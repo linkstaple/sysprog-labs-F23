@@ -4,19 +4,13 @@
 #include <time.h>
 #include "libcoro.h"
 
-void print_numbers(int *arr, int length);
-int read_numbers_from_file(char *filename, int *dest);
-void write_numbers_to_file(char *filename, int *numbers, int len);
-struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of_ints b);
-
+// maximum amount of integers in single file
+const int MAX_INTEGERS_AMOUNT = 40000;
 
 struct array_of_ints {
     int *array;
     int len;
 };
-
-
-const int MAX_INTEGERS_AMOUNT = 40000;
 
 struct my_context {
 	char *name;
@@ -28,6 +22,9 @@ struct my_context {
 	int *next_file_idx;
 };
 
+int read_numbers_from_file(char *filename, int *dest);
+void write_numbers_to_file(char *filename, int *numbers, int len);
+struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of_ints b);
 struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context *ctx);
 void update_coro_work_time(struct my_context *ctx);
 void set_coro_timestamp(struct my_context *ctx);
@@ -80,7 +77,8 @@ coroutine_func_f(void *context)
 
 	update_coro_work_time(ctx);
 
-	printf("coro %s has been working for %ld secs and %ld nanosecs\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec);
+	long double msec_diff = ctx->coro_work_time->tv_nsec / 1e6;
+	printf("coro %s has been working for %ld secs and %ld nsec (%Lf msec)\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec, msec_diff);
 	printf("coro %s has had %lld switches\n", name, coro_switch_count(coro_this()));
 
 	my_context_delete(ctx);
@@ -145,9 +143,11 @@ main(int argc, char **argv)
 	struct timespec* program_end_timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, program_end_timestamp);
 
-	printf("Program has been working for %ld secs and %ld nanosecs\n",
+	long double msec_diff = (program_end_timestamp->tv_nsec - program_start_timestamp->tv_nsec) / 1e6;
+	printf("Program has been working for %ld secs and %ld nsec (%Lf msec)\n",
 		program_end_timestamp->tv_sec - program_start_timestamp->tv_sec,
-		program_end_timestamp->tv_nsec - program_start_timestamp->tv_nsec);
+		program_end_timestamp->tv_nsec - program_start_timestamp->tv_nsec,
+		msec_diff);
 
 	free(program_start_timestamp);
 	free(program_end_timestamp);
@@ -155,7 +155,9 @@ main(int argc, char **argv)
 	return 0;
 }
 
-int read_numbers_from_file(char *filename, int *dest) {
+int
+read_numbers_from_file(char *filename, int *dest)
+{
     FILE *file = fopen(filename, "r");
 
     int length = 0;
@@ -168,7 +170,9 @@ int read_numbers_from_file(char *filename, int *dest) {
     return length;
 }
 
-void write_numbers_to_file(char *filename, int *numbers, int len) {
+void
+write_numbers_to_file(char *filename, int *numbers, int len)
+{
     FILE *file = fopen(filename, "w+");
     for (int i = 0; i < len; i++) {
         fprintf(file, "%d ", numbers[i]);
@@ -177,15 +181,9 @@ void write_numbers_to_file(char *filename, int *numbers, int len) {
     fclose(file);
 }
 
-void print_numbers(int *numbers, int len) {
-    for (int i = 0; i < len; i++) {
-        printf("%d ", numbers[i]);
-    }
-
-    printf("\n");
-}
-
-struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context *ctx) {
+struct array_of_ints
+get_sorted_numbers(int *numbers, int len, struct my_context *ctx)
+{
     struct array_of_ints result;
 
     if (len == 1) {
@@ -227,7 +225,9 @@ struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context
 
 }
 
-struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of_ints b) {
+struct array_of_ints
+merge_sorted_arrays(struct array_of_ints a, struct array_of_ints b)
+{
     int *left = a.array;
     int *right = b.array;
 
@@ -258,7 +258,9 @@ struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of
     return merged;
 }
 
-void update_coro_work_time(struct my_context *ctx) {
+void
+update_coro_work_time(struct my_context *ctx)
+{
 	struct timespec *timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, timestamp);
 
@@ -270,7 +272,9 @@ void update_coro_work_time(struct my_context *ctx) {
 	free(timestamp);
 }
 
-void set_coro_timestamp(struct my_context *ctx) {
+void
+set_coro_timestamp(struct my_context *ctx)
+{
 	struct timespec *timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, timestamp);
 	free(ctx->prev_timestamp);
