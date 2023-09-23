@@ -67,7 +67,7 @@ coroutine_func_f(void *context)
 		char *filename = ctx->filenames[file_idx];
 		struct array_of_ints *dest = ctx->dest+file_idx;
 		(*ctx->next_file_idx)++;
-		printf("coro %s is starting processing file \"%s\"\n", name, filename);
+		printf("coro \"%s\" is starting processing file \"%s\"\n", name, filename);
 
 		int *file_numbers = malloc(MAX_INTEGERS_AMOUNT * sizeof(int));
 		int amount_of_numbers = read_numbers_from_file(filename, file_numbers);
@@ -76,7 +76,7 @@ coroutine_func_f(void *context)
 		dest->len = sorted_data.len;
 		free(file_numbers);
 
-		printf("coro %s has ended processing file \"%s\"\n", name, filename);
+		printf("coro \"%s\" has ended processing file \"%s\"\n", name, filename);
 	}
 
 	update_coro_work_time(ctx);
@@ -97,12 +97,9 @@ main(int argc, char **argv)
 	clock_gettime(CLOCK_MONOTONIC, program_start_timestamp);
 
 	int coros_total = atoi(argv[1]);
-	printf("number of coros: %d\n", coros_total);
 
 	int files_total = argc - 2;
-	char **filenames = (char**) malloc(files_total * sizeof(char*));
-	memcpy(filenames, argv + 2, files_total * sizeof(char*));
-	printf("files to process:%d\n", files_total);
+	char **filenames = argv + 2;
 
 	struct array_of_ints *destinations = malloc(files_total * sizeof(struct array_of_ints));
 
@@ -122,13 +119,12 @@ main(int argc, char **argv)
 		coro_delete(c);
 	}
 
-	free(filenames);
 	free(next_file_idx);
 
 	int final_length = 0;
 
-    for (int i = 1; i <= files_total; i++) {
-        final_length += destinations[i - 1].len;
+    for (int i = 0; i < files_total; i++) {
+        final_length += destinations[i].len;
     }
 
     int *all_numbers = (int*) malloc(final_length * sizeof(int));
