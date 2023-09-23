@@ -20,10 +20,12 @@ const int MAX_INTEGERS_AMOUNT = 40000;
 
 struct my_context {
 	char *name;
-	char *filename;
+	int files_total;
+	char **filenames;
 	struct array_of_ints *dest;
 	struct timespec* prev_timestamp;
 	struct timespec* coro_work_time;
+	int *next_file_idx;
 };
 
 struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context *ctx);
@@ -31,15 +33,18 @@ void update_coro_work_time(struct my_context *ctx);
 void set_coro_timestamp(struct my_context *ctx);
 
 static struct my_context *
-my_context_new(const char *name, const char *filename, struct array_of_ints *dest)
+my_context_new(const char *name, int files_total, char** filenames, int *next_file_idx, struct array_of_ints *dest)
 {
 	struct my_context *ctx = malloc(sizeof(*ctx));
 	ctx->name = strdup(name);
-	ctx->filename = strdup(filename);
+	ctx->files_total = files_total;
+	ctx->filenames = filenames;
+	ctx->next_file_idx = next_file_idx;
 	ctx->dest = dest;
 	ctx->coro_work_time = (struct timespec*) malloc(sizeof(struct timespec*));
 	ctx->coro_work_time->tv_nsec = 0;
 	ctx->coro_work_time->tv_sec = 0;
+
 	return ctx;
 }
 
@@ -58,16 +63,20 @@ coroutine_func_f(void *context)
 	struct my_context *ctx = context;
 	set_coro_timestamp(ctx);
 	char *name = ctx->name;
-	char *filename = ctx->filename;
-	struct array_of_ints *dest = ctx->dest;
 
-	printf("coro name=%s\n", name);
+	int file_idx;
+	while ((file_idx = *ctx->next_file_idx) < ctx->files_total) {
+		char *filename = ctx->filenames[file_idx];
+		struct array_of_ints *dest = ctx->dest+file_idx;
+		(*ctx->next_file_idx)++;
+		printf("coro name=%s file_idx=%d filename=%s\n", name, file_idx, filename);
 
-	int *file_numbers = malloc(MAX_INTEGERS_AMOUNT * sizeof(int));
-	int amount_of_numbers = read_numbers_from_file(filename, file_numbers);
-	struct array_of_ints sorted_data = get_sorted_numbers(file_numbers, amount_of_numbers, ctx);
-	dest->array = sorted_data.array;
-	dest->len = sorted_data.len;
+		int *file_numbers = malloc(MAX_INTEGERS_AMOUNT * sizeof(int));
+		int amount_of_numbers = read_numbers_from_file(filename, file_numbers);
+		struct array_of_ints sorted_data = get_sorted_numbers(file_numbers, amount_of_numbers, ctx);
+		dest->array = sorted_data.array;
+		dest->len = sorted_data.len;
+	}
 
 	update_coro_work_time(ctx);
 
@@ -85,26 +94,25 @@ main(int argc, char **argv)
 	struct timespec* program_start_timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, program_start_timestamp);
 
-	int number_of_coros = atoi(argv[1]);
-	printf("number of coros: %d\n", number_of_coros);
+	int coros_total = atoi(argv[1]);
+	printf("number of coros: %d\n", coros_total);
 
-	int amount_of_files = argc - 2;
-	char **filenames = (char**) malloc(amount_of_files * sizeof(char*));
-	memcpy(filenames, argv + 2, amount_of_files * sizeof(char*));
-	printf("files to process:%d\n", amount_of_files);
-	for (int i = 0; i < amount_of_files; i++) {
-		printf("%s ", filenames[i]);
-	}
-	printf("\n");
+	int files_total = argc - 2;
+	char **filenames = (char**) malloc(files_total * sizeof(char*));
+	memcpy(filenames, argv + 2, files_total * sizeof(char*));
+	printf("files to process:%d\n", files_total);
 
-	struct array_of_ints *destinations = malloc(amount_of_files * sizeof(struct array_of_ints));
+	struct array_of_ints *destinations = malloc(files_total * sizeof(struct array_of_ints));
+
+	int *next_file_idx = (int*) malloc(sizeof(int));
+	*next_file_idx = 0;
 
 	coro_sched_init();
 
-	for (int i = 0; i < amount_of_files; ++i) {
+	for (int i = 0; i < coros_total; ++i) {
 		char name[16];
 		sprintf(name, "coro_%d", i);
-		coro_new(coroutine_func_f, my_context_new(name, filenames[i], destinations + i));
+		coro_new(coroutine_func_f, my_context_new(name, files_total, filenames, next_file_idx, destinations));
 	};
 
 	struct coro *c;
@@ -112,22 +120,27 @@ main(int argc, char **argv)
 		coro_delete(c);
 	}
 
+	free(filenames);
+
 	int final_length = 0;
 
-    for (int i = 1; i <= amount_of_files; i++) {
+    for (int i = 1; i <= files_total; i++) {
         final_length += destinations[i - 1].len;
     }
 
     int *all_numbers = (int*) malloc(final_length * sizeof(int));
-    for (int i = 0, idx = 0; i < amount_of_files; i++) {
+    for (int i = 0, idx = 0; i < files_total; i++) {
         memcpy(all_numbers + idx, destinations[i].array, destinations[i].len * sizeof(int));
         idx += destinations[i].len;
         free(destinations[i].array);
     }
 
-	// print_numbers(all_numbers, final_length);
+	free(destinations);
+
     struct array_of_ints result = get_sorted_numbers(all_numbers, final_length, NULL);
     write_numbers_to_file("result.txt", result.array, result.len);
+
+	free(all_numbers);
 
 	struct timespec* program_end_timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, program_end_timestamp);
