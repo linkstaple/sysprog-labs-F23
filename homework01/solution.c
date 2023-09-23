@@ -74,6 +74,7 @@ coroutine_func_f(void *context)
 		struct array_of_ints sorted_data = get_sorted_numbers(file_numbers, amount_of_numbers, ctx);
 		dest->array = sorted_data.array;
 		dest->len = sorted_data.len;
+		free(file_numbers);
 
 		printf("coro %s has ended processing file \"%s\"\n", name, filename);
 	}
@@ -122,6 +123,7 @@ main(int argc, char **argv)
 	}
 
 	free(filenames);
+	free(next_file_idx);
 
 	int final_length = 0;
 
@@ -142,6 +144,7 @@ main(int argc, char **argv)
     write_numbers_to_file("result.txt", result.array, result.len);
 
 	free(all_numbers);
+	free(result.array);
 
 	struct timespec* program_end_timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, program_end_timestamp);
@@ -153,6 +156,7 @@ main(int argc, char **argv)
 
 	free(program_start_timestamp);
 	free(program_end_timestamp);
+	free(program_work_time);
 
 	return 0;
 }
