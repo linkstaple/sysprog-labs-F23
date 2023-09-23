@@ -82,7 +82,7 @@ coroutine_func_f(void *context)
 	update_coro_work_time(ctx);
 
 	long double msec_diff = ctx->coro_work_time->tv_nsec / 1e6;
-	printf("coro \"%s\" has been working for %ld secs and %ld nsec (or %Lf msec)\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec, msec_diff);
+	printf("coro \"%s\" has been working for %ld secs and %ld nsec (or %Lf ms)\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec, msec_diff);
 	printf("coro \"%s\" performed %lld switches\n", name, coro_switch_count(coro_this()));
 
 	my_context_delete(ctx);
@@ -151,7 +151,7 @@ main(int argc, char **argv)
 
 	struct timespec* program_work_time = get_time_diff(program_start_timestamp, program_end_timestamp);
 	long double msec_diff = (long double)program_work_time->tv_nsec / 1000000;
-	printf("Program has been working for %ld secs and %ld nsec (or %Lf msec)\n",
+	printf("Program has been working for %ld secs and %ld nsec (or %Lf ms)\n",
 		program_work_time->tv_sec, program_work_time->tv_nsec, msec_diff);
 
 	free(program_start_timestamp);
