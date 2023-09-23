@@ -28,6 +28,7 @@ struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of
 struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context *ctx);
 void update_coro_work_time(struct my_context *ctx);
 void set_coro_timestamp(struct my_context *ctx);
+struct timespec* get_time_diff(struct timespec* prev, struct timespec* current);
 
 static struct my_context *
 my_context_new(const char *name, int files_total, char** filenames, int *next_file_idx, struct array_of_ints *dest)
@@ -66,20 +67,22 @@ coroutine_func_f(void *context)
 		char *filename = ctx->filenames[file_idx];
 		struct array_of_ints *dest = ctx->dest+file_idx;
 		(*ctx->next_file_idx)++;
-		printf("coro name=%s file_idx=%d filename=%s\n", name, file_idx, filename);
+		printf("coro %s is starting processing file \"%s\"\n", name, filename);
 
 		int *file_numbers = malloc(MAX_INTEGERS_AMOUNT * sizeof(int));
 		int amount_of_numbers = read_numbers_from_file(filename, file_numbers);
 		struct array_of_ints sorted_data = get_sorted_numbers(file_numbers, amount_of_numbers, ctx);
 		dest->array = sorted_data.array;
 		dest->len = sorted_data.len;
+
+		printf("coro %s has ended processing file \"%s\"\n", name, filename);
 	}
 
 	update_coro_work_time(ctx);
 
 	long double msec_diff = ctx->coro_work_time->tv_nsec / 1e6;
-	printf("coro %s has been working for %ld secs and %ld nsec (%Lf msec)\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec, msec_diff);
-	printf("coro %s has had %lld switches\n", name, coro_switch_count(coro_this()));
+	printf("coro \"%s\" has been working for %ld secs and %ld nsec (or %Lf msec)\n", name, ctx->coro_work_time->tv_sec, ctx->coro_work_time->tv_nsec, msec_diff);
+	printf("coro \"%s\" performed %lld switches\n", name, coro_switch_count(coro_this()));
 
 	my_context_delete(ctx);
 
@@ -143,11 +146,10 @@ main(int argc, char **argv)
 	struct timespec* program_end_timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, program_end_timestamp);
 
-	long double msec_diff = (program_end_timestamp->tv_nsec - program_start_timestamp->tv_nsec) / 1e6;
-	printf("Program has been working for %ld secs and %ld nsec (%Lf msec)\n",
-		program_end_timestamp->tv_sec - program_start_timestamp->tv_sec,
-		program_end_timestamp->tv_nsec - program_start_timestamp->tv_nsec,
-		msec_diff);
+	struct timespec* program_work_time = get_time_diff(program_start_timestamp, program_end_timestamp);
+	long double msec_diff = (long double)program_work_time->tv_nsec / 1000000;
+	printf("Program has been working for %ld secs and %ld nsec (or %Lf msec)\n",
+		program_work_time->tv_sec, program_work_time->tv_nsec, msec_diff);
 
 	free(program_start_timestamp);
 	free(program_end_timestamp);
@@ -264,12 +266,19 @@ update_coro_work_time(struct my_context *ctx)
 	struct timespec *timestamp = (struct timespec*) malloc(sizeof(struct timespec));
 	clock_gettime(CLOCK_MONOTONIC, timestamp);
 
-	time_t sec_diff = timestamp->tv_sec - ctx->prev_timestamp->tv_sec;
-	long nsec_diff = timestamp->tv_nsec - ctx->prev_timestamp->tv_nsec;
-	ctx->coro_work_time->tv_sec += sec_diff;
-	ctx->coro_work_time->tv_nsec += nsec_diff;
+	struct timespec* time_diff = get_time_diff(ctx->prev_timestamp, timestamp);
+	struct timespec* coro_work_time = ctx->coro_work_time;
+	coro_work_time->tv_sec += time_diff->tv_sec;
+	coro_work_time->tv_nsec += time_diff->tv_nsec;
+
+	long long additional_secs = coro_work_time->tv_nsec / 1000000000L;
+	if (additional_secs > 0) {
+		coro_work_time->tv_sec += additional_secs;
+		coro_work_time->tv_nsec -= (additional_secs * 1000000000L);
+	}
 
 	free(timestamp);
+	free(time_diff);
 }
 
 void
@@ -279,4 +288,20 @@ set_coro_timestamp(struct my_context *ctx)
 	clock_gettime(CLOCK_MONOTONIC, timestamp);
 	free(ctx->prev_timestamp);
 	ctx->prev_timestamp = timestamp;
+}
+
+struct timespec*
+get_time_diff(struct timespec* from, struct timespec* to)
+{
+	long long sec_diff = to->tv_sec - from->tv_sec;
+	long long nsec_diff = to->tv_nsec - from->tv_nsec;
+	if (nsec_diff < 0) {
+		nsec_diff += (long)1e9;
+		sec_diff--;
+	}
+
+	struct timespec* result = (struct timespec*) malloc (sizeof(struct timespec));
+	result->tv_sec = sec_diff;
+	result->tv_nsec = nsec_diff;
+	return result;
 }
