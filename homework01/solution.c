@@ -4,9 +4,6 @@
 #include <time.h>
 #include "libcoro.h"
 
-// maximum amount of integers in single file
-const int MAX_INTEGERS_AMOUNT = 40000;
-
 struct array_of_ints {
     int *array;
     int len;
@@ -22,7 +19,7 @@ struct my_context {
 	int *next_file_idx;
 };
 
-int read_numbers_from_file(char *filename, int *dest);
+struct array_of_ints read_numbers_from_file(char *filename);
 void write_numbers_to_file(char *filename, int *numbers, int len);
 struct array_of_ints merge_sorted_arrays(struct array_of_ints a, struct array_of_ints b);
 struct array_of_ints get_sorted_numbers(int *numbers, int len, struct my_context *ctx);
@@ -69,12 +66,11 @@ coroutine_func_f(void *context)
 		(*ctx->next_file_idx)++;
 		printf("coro \"%s\" is starting processing file \"%s\"\n", name, filename);
 
-		int *file_numbers = malloc(MAX_INTEGERS_AMOUNT * sizeof(int));
-		int amount_of_numbers = read_numbers_from_file(filename, file_numbers);
-		struct array_of_ints sorted_data = get_sorted_numbers(file_numbers, amount_of_numbers, ctx);
+		struct array_of_ints read_data = read_numbers_from_file(filename);
+		struct array_of_ints sorted_data = get_sorted_numbers(read_data.array, read_data.len, ctx);
 		dest->array = sorted_data.array;
 		dest->len = sorted_data.len;
-		free(file_numbers);
+		free(read_data.array);
 
 		printf("coro \"%s\" has ended processing file \"%s\"\n", name, filename);
 	}
@@ -157,19 +153,29 @@ main(int argc, char **argv)
 	return 0;
 }
 
-int
-read_numbers_from_file(char *filename, int *dest)
+struct array_of_ints
+read_numbers_from_file(char *filename)
 {
+	int max_length = 10000;
+	int *numbers = (int*) malloc(max_length * sizeof(int));
     FILE *file = fopen(filename, "r");
 
-    int length = 0;
-    for (int num; fscanf(file, "%d", &num) != EOF; length++) {
-        dest[length] = num;
+	int idx = 0;
+    for (; fscanf(file, "%d", numbers+idx) != EOF; idx++) {
+		if (idx == max_length - 1) {
+			int *numbers_p = numbers;
+			max_length *= 2;
+			numbers = (int*) malloc(max_length * sizeof(int));
+			memcpy(numbers, numbers_p, (idx + 1) * sizeof(int));
+			free(numbers_p);
+		}
     }
 
     fclose(file);
 
-    return length;
+	struct array_of_ints result = {numbers, idx + 1};
+
+    return result;
 }
 
 void
