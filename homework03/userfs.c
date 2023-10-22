@@ -68,6 +68,8 @@ struct filedesc {
 
 	bool is_occupied;
 	ssize_t offset;
+	bool can_read;
+	bool can_write;
 };
 
 /**
@@ -153,6 +155,8 @@ int ufs_open(const char *filename, int flags)
 	filedesc->file = f;
 	filedesc->is_occupied = true;
 	filedesc->offset = 0;
+	filedesc->can_read = flags == 0 || is_permitted(flags, UFS_CREATE) || is_permitted(flags, UFS_READ_ONLY) || is_permitted(flags, UFS_READ_WRITE);
+	filedesc->can_write = flags == 0 || is_permitted(flags, UFS_CREATE) || is_permitted(flags, UFS_WRITE_ONLY) || is_permitted(flags, UFS_READ_WRITE);
 	file_descriptors[fd] = filedesc;
 	return fd;
 }
@@ -167,9 +171,14 @@ ufs_write(int fd, const char *buf, size_t size)
 	}
 
 	struct filedesc *filedesc = file_descriptors[fd];
-	struct file *file = filedesc->file;
 
-	// size = min(strlen(buf), size);
+	if (filedesc->can_write == false)
+	{
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
+		return -1;
+	}
+
+	struct file *file = filedesc->file;
 
 	if (size > file->bytes_left)
 	{
@@ -220,6 +229,13 @@ ufs_read(int fd, char *buf, size_t size)
 	}
 
 	struct filedesc *filedesc = file_descriptors[fd];
+
+	if (filedesc->can_read == false)
+	{
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
+		return -1;
+	}
+
 	struct file *file = filedesc->file;
 
 	ssize_t bytes_read = 0;
