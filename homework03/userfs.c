@@ -98,10 +98,6 @@ append_file(struct file *new_file);
 int
 get_fd();
 
-// append new FD to FD list
-void
-append_filedesc(struct file *f, int fd);
-
 // create empty block on file
 struct block *
 create_block(struct file *file);
@@ -330,7 +326,6 @@ int ufs_delete(const char *filename)
 		free_file_memory(file);
 		free(file);
 	}
-
 	return 0;
 }
 
@@ -339,12 +334,13 @@ void ufs_destroy(void)
 	struct file *file = file_list;
 	while (file != NULL)
 	{
-		free_file_memory(file);
-		free(file);
+		struct file* copy = file;
 		file = file->next;
+		free_file_memory(copy);
+		free(copy);
 	}
 
-	for (int i = 0; i < file_descriptor_count; i++)
+	for (int i = 0; i < file_descriptor_capacity; i++)
 	{
 		struct filedesc *fd = file_descriptors[i];
 		if (fd == NULL)
@@ -356,7 +352,13 @@ void ufs_destroy(void)
 			free_file_memory(file);
 			free(file);
 		}
+
+		free(fd);
+		file_descriptors[i] = NULL;
 	}
+
+	free(file_list);
+	free(file_descriptors);
 }
 
 int
@@ -489,6 +491,7 @@ get_fd()
 		file_descriptor_capacity *= 2;
 		struct filedesc **new_fd_list = (struct filedesc **)malloc(file_descriptor_capacity * sizeof(struct filedesc *));
 		memcpy(new_fd_list, file_descriptors, file_descriptor_capacity / 2 * sizeof(struct filedesc *));
+		free(file_descriptors);
 		file_descriptors = new_fd_list;
 		fd = file_descriptor_count;
 	}
@@ -508,15 +511,6 @@ get_fd()
 	return fd;
 }
 
-void
-append_filedesc(struct file *f, int fd)
-{
-	struct filedesc *filedesc = (struct filedesc *)malloc(sizeof(struct filedesc));
-	filedesc->file = f;
-	filedesc->is_occupied = true;
-	file_descriptors[fd] = filedesc;
-}
-
 struct block *
 create_block(struct file *file)
 {
@@ -528,7 +522,7 @@ create_block(struct file *file)
 	struct block *new_block = (struct block *)malloc(sizeof(struct block));
 	new_block->memory = (char *)malloc(BLOCK_SIZE);
 	new_block->occupied = 0;
-	new_block->next = 0;
+	new_block->next = NULL;
 
 	if (file->last_block == NULL)
 	{
@@ -567,9 +561,9 @@ free_file_memory(struct file *file)
 	struct block *block = file->block_list;
 	while (block != NULL)
 	{
-		free(block->memory);
 		struct block *copy = block;
 		block = block->next;
+		free(copy->memory);
 		free(copy);
 	}
 	file->bytes_left = MAX_FILE_SIZE;
