@@ -334,7 +334,7 @@ void ufs_destroy(void)
 	struct file *file = file_list;
 	while (file != NULL)
 	{
-		struct file* copy = file;
+		struct file *copy = file;
 		file = file->next;
 		free_file_memory(copy);
 		free(copy);
@@ -347,7 +347,7 @@ void ufs_destroy(void)
 			continue;
 
 		struct file *file = fd->file;
-		if (file->in_list == false)
+		if (file != NULL && file->in_list == false)
 		{
 			free_file_memory(file);
 			free(file);
@@ -394,29 +394,26 @@ ufs_resize(int fd, size_t new_size)
 			block = create_block(file);
 			new_size -= BLOCK_SIZE;
 		}
-		else
+		else if (new_size >= BLOCK_SIZE)
 		{
-			size_t block_offset = min(new_size, block->occupied);
-			if (block_offset == BLOCK_SIZE)
-			{
-				new_size -= BLOCK_SIZE;
-			}
-			else if (block_offset < (size_t)block->occupied)
-			{
-				char *new_memory = (char *)malloc(BLOCK_SIZE);
-				memcpy(new_memory, block->memory, block_offset);
-				free(block->memory);
-				block->memory = new_memory;
-				block->occupied = new_size;
-				new_size = 0;
-			}
+			new_size -= BLOCK_SIZE;
+		}
+		else if (new_size < (size_t)block->occupied)
+		{
+			char *new_memory = (char *)malloc(BLOCK_SIZE);
+			memcpy(new_memory, block->memory, new_size);
+			free(block->memory);
+			block->memory = new_memory;
+			block->occupied = new_size;
+			new_size = 0;
 		}
 
 		block = block->next;
 	}
 
-	if (block->prev != NULL)
+	if (block != NULL && block->prev != NULL)
 	{
+		file->last_block = block->prev;
 		block->prev->next = NULL;
 	}
 
@@ -440,7 +437,8 @@ ufs_resize(int fd, size_t new_size)
 	return 0;
 }
 
-bool is_permitted(int flags, enum open_flags flag)
+bool
+is_permitted(int flags, enum open_flags flag)
 {
 	return (flags & flag) == flag;
 }
@@ -566,6 +564,7 @@ free_file_memory(struct file *file)
 		free(copy->memory);
 		free(copy);
 	}
+	free(file->name);
 	file->bytes_left = MAX_FILE_SIZE;
 	file->block_list = file->last_block = NULL;
 }
