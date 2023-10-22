@@ -195,6 +195,7 @@ ufs_write(int fd, const char *buf, size_t size)
 		if (block == NULL)
 		{
 			block = create_block(file);
+			offset = 0;
 		}
 
 		ssize_t block_offset = min(offset, block->occupied);
@@ -211,6 +212,7 @@ ufs_write(int fd, const char *buf, size_t size)
 		size -= write_bytes;
 		block->occupied = max(block_offset + write_bytes, block->occupied);
 		block = block->next;
+		offset = 0;
 	}
 
 	filedesc->offset += buf_offset;
@@ -260,7 +262,7 @@ ufs_read(int fd, char *buf, size_t size)
 
 			memcpy(buf + bytes_read, file_block->memory + block_offset, bytes_to_read);
 			bytes_read += bytes_to_read;
-			offset -= block_offset;
+			offset = 0;
 			size -= bytes_to_read;
 		}
 		file_block = file_block->next;
@@ -323,6 +325,11 @@ int ufs_delete(const char *filename)
 	}
 
 	file->in_list = false;
+	if (file->refs == 0) {
+		free_file_memory(file);
+		free(file);
+	}
+
 	return 0;
 }
 
@@ -349,6 +356,74 @@ void ufs_destroy(void)
 			free(file);
 		}
 	}
+}
+
+int
+ufs_resize(int fd, size_t new_size)
+{
+	if (is_valid_fd(fd) == false)
+	{
+		ufs_error_code = UFS_ERR_NO_FILE;
+		return -1;
+	}
+
+	struct filedesc *filedesc = file_descriptors[fd];
+
+	if (filedesc->can_write == false)
+	{
+		ufs_error_code = UFS_ERR_NO_PERMISSION;
+		return -1;
+	}
+
+	if (new_size > MAX_FILE_SIZE) {
+		ufs_error_code = UFS_ERR_NO_MEM;
+		return -1;
+	}
+
+	struct file* file = filedesc->file;
+	struct block* block = file->block_list;
+
+	while(new_size > 0) {
+		if (block == NULL) {
+			block = create_block(file);
+			new_size -= BLOCK_SIZE;
+		} else {
+			size_t block_offset = min(new_size, block->occupied);
+			if (block_offset == BLOCK_SIZE) {
+				new_size -= BLOCK_SIZE;
+			} else if (block_offset < (size_t)block->occupied) {
+				char *new_memory = (char*) malloc(BLOCK_SIZE);
+				memcpy(new_memory, block->memory, block_offset);
+				free(block->memory);
+				block->memory = new_memory;
+				block->occupied = new_size;
+				new_size = 0;
+			}
+		}
+
+		block = block->next;
+	}
+
+	if (block->prev != NULL) {
+		block->prev->next = NULL;
+	}
+
+	while(block != NULL) {
+		struct block* copy = block;
+		block = block->next;
+		free(copy->memory);
+		free(copy);
+	}
+
+	size_t new_file_size = 0;
+	block = file->block_list;
+	while(block != NULL) {
+		new_file_size += block->occupied;
+		block = block->next;
+	}
+
+	file->bytes_left = MAX_FILE_SIZE - new_file_size;
+	return 0;
 }
 
 bool
