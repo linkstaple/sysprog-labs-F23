@@ -211,8 +211,14 @@ ufs_write(int fd, const char *buf, size_t size)
 		offset = 0;
 	}
 
+	block = file->block_list;
+	while (block->next != NULL) {
+		block = block->next;
+	}
+
 	filedesc->offset += buf_offset;
 	file->bytes_left -= buf_offset;
+	file->last_block = block;
 
 	return buf_offset;
 }
@@ -425,6 +431,7 @@ ufs_resize(int fd, size_t new_size)
 	while (block != NULL)
 	{
 		new_file_size += block->occupied;
+		file->last_block = block;
 		block = block->next;
 	}
 
