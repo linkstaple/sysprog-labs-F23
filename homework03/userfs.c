@@ -98,7 +98,7 @@ append_file(struct file *new_file);
 int
 get_fd();
 
-// create empty block on file
+// create empty block on file and append it to list
 struct block *
 create_block(struct file *file);
 
@@ -302,22 +302,17 @@ int ufs_delete(const char *filename)
 
 	struct file *prev_file = file->prev;
 	struct file *next_file = file->next;
-	if (prev_file != NULL && next_file != NULL)
-	{
-		prev_file->next = next_file;
-		next_file->prev = prev_file;
-	}
-	else if (prev_file == NULL)
+	if (prev_file == NULL)
 	{
 		file_list = next_file;
 		if (next_file != NULL)
-		{
 			next_file->prev = NULL;
-		}
 	}
-	else if (next_file == NULL)
+	else
 	{
-		prev_file->next = NULL;
+		prev_file->next = next_file;
+		if (next_file != NULL)
+			next_file->prev = prev_file;
 	}
 
 	file->in_list = false;
