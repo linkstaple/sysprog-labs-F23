@@ -3,7 +3,6 @@
 #include <assert.h>
 #include <limits.h>
 #include <string.h>
-// #include "heap_help/heap_help.h"
 
 static void
 test_open(void)
@@ -460,7 +459,5 @@ main(void)
 	ufs_destroy();
 
 	unit_test_finish();
-	// int alloc = heaph_get_alloc_count();
-	// printf("alloc=%d\n", alloc);
 	return 0;
 }
