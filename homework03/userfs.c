@@ -128,8 +128,8 @@ int ufs_open(const char *filename, int flags)
 			f->last_block = NULL;
 			f->prev = NULL;
 			f->next = NULL;
-			f->name = (char *)malloc(strlen(filename));
-			memcpy(f->name, filename, strlen(filename));
+			f->name = (char *)malloc((strlen(filename) + 1) * sizeof(char));
+			strcpy(f->name, filename);
 			f->refs = 0;
 			f->bytes_left = MAX_FILE_SIZE;
 			f->in_list = true;
