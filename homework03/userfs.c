@@ -294,6 +294,7 @@ int ufs_close(int fd)
 
 	free(filedesc);
 	file_descriptors[fd] = NULL;
+	file_descriptor_count--;
 	return 0;
 }
 
