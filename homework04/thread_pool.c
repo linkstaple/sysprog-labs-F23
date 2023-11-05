@@ -29,6 +29,7 @@ struct thread_pool_task {
 	bool is_running;
 	bool is_pushed;
 	bool is_joined;
+	bool is_detached;
 
 	struct thread_pool_task *next;
 	struct thread_pool_task *prev;
@@ -80,6 +81,7 @@ make_thread_pool_task(struct thread_task *thread_task)
 	task->is_running = false;
 	task->is_pushed = false;
 	task->is_joined = false;
+	task->is_detached = false;
 	task->prev = NULL;
 	task->next = NULL;
 	task->pool = NULL;
@@ -284,8 +286,12 @@ thread_pool_worker(void *arg)
 		pthread_mutex_lock(&pool->mutex);
 		tp_task->is_finished = true;
 		tp_task->is_running = false;
-		pthread_cond_signal(&tp_task->end_cond);
 		pool->active_threads_cnt--;
+		if (tp_task->is_detached)
+		{
+			delete_task(tp_task->thread_task);
+		}
+		pthread_cond_signal(&tp_task->end_cond);
 		pthread_mutex_unlock(&pool->mutex);
 	}
 
@@ -363,7 +369,7 @@ delete_task(struct thread_task *task)
 	while (list_it != NULL)
 	{
 		struct thread_pool_task *tp_task = list_it->tp_task;
-		if (!tp_task->is_joined)
+		if (!(tp_task->is_joined || tp_task->is_detached))
 		{
 			return TPOOL_ERR_TASK_IN_POOL;
 		}
@@ -449,8 +455,21 @@ get_task(struct thread_pool *pool)
 int
 thread_task_detach(struct thread_task *task)
 {
-	(void)task;
-	return TPOOL_ERR_NOT_IMPLEMENTED;
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
+	{
+		return TPOOL_ERR_TASK_NOT_PUSHED;
+	}
+
+	struct thread_pool *pool = tp_task->pool;
+	pthread_mutex_lock(&pool->mutex);
+	tp_task->is_detached = true;
+	if (tp_task->is_finished)
+	{
+		delete_task(task);
+	}
+	pthread_mutex_unlock(&pool->mutex);
+	return 0;
 }
 
 #endif
