@@ -29,6 +29,7 @@ struct thread_pool_task {
 	bool is_running;
 	bool is_pushed;
 	bool is_joined;
+
 	struct thread_pool_task *next;
 	struct thread_pool_task *prev;
 	struct thread_pool *pool;
@@ -60,6 +61,9 @@ thread_pool_worker(void *arg);
 
 struct thread_pool_task*
 get_task(struct thread_pool *pool);
+
+int
+delete_task(struct thread_task *task);
 
 struct thread_pool_task*
 get_tp_task(const struct thread_task *task)
@@ -344,7 +348,7 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result)
 #endif
 
 int
-thread_task_delete(struct thread_task *task)
+delete_task(struct thread_task *task)
 {
 	struct thread_pool_task *tp_task = get_tp_task(task);
 	if (tp_task == NULL)
@@ -354,7 +358,6 @@ thread_task_delete(struct thread_task *task)
 	}
 
 	struct thread_pool *pool = tp_task->pool;
-	pthread_mutex_lock(&pool->mutex);
 	struct tp_task_list *list_it = task->list;
 
 	while (list_it != NULL)
@@ -362,7 +365,6 @@ thread_task_delete(struct thread_task *task)
 		struct thread_pool_task *tp_task = list_it->tp_task;
 		if (!tp_task->is_joined)
 		{
-			pthread_mutex_unlock(&pool->mutex);
 			return TPOOL_ERR_TASK_IN_POOL;
 		}
 		list_it = list_it->next;
@@ -410,9 +412,24 @@ thread_task_delete(struct thread_task *task)
 
 	free(task);
 	pool->tasks_cnt -= deleted_tasks_cnt;
-	pthread_mutex_unlock(&pool->mutex);
 
 	return 0;
+}
+
+int
+thread_task_delete(struct thread_task *task)
+{
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
+	{
+		free(task);
+		return 0;
+	}
+	struct thread_pool *pool = tp_task->pool;
+	pthread_mutex_lock(&pool->mutex);
+	int delete_result = delete_task(task);
+	pthread_mutex_unlock(&pool->mutex);
+	return delete_result;
 }
 
 struct thread_pool_task*
@@ -432,7 +449,6 @@ get_task(struct thread_pool *pool)
 int
 thread_task_detach(struct thread_task *task)
 {
-	/* IMPLEMENT THIS FUNCTION */
 	(void)task;
 	return TPOOL_ERR_NOT_IMPLEMENTED;
 }
