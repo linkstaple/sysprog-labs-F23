@@ -1,4 +1,5 @@
 **/*.txt
 **/*.out
 **/*.o
+.vscode
 homework02
