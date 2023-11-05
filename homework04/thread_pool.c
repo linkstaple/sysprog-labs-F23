@@ -4,16 +4,19 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
+#include <time.h>
 
 struct thread_pool;
 struct thread_task;
 struct thread_pool_task;
+struct tp_task_list;
 
 struct thread_task {
 	thread_task_f function;
 	void *arg;
 	
-	struct thread_pool_task *tp_task;
+	struct tp_task_list *list;
 };
 
 struct thread_pool_task {
@@ -27,7 +30,13 @@ struct thread_pool_task {
 	bool is_pushed;
 	bool is_joined;
 	struct thread_pool_task *next;
+	struct thread_pool_task *prev;
 	struct thread_pool *pool;
+};
+
+struct tp_task_list {
+	struct thread_pool_task *tp_task;
+	struct tp_task_list *next;
 };
 
 struct thread_pool {
@@ -53,6 +62,12 @@ struct thread_pool_task*
 get_task(struct thread_pool *pool);
 
 struct thread_pool_task*
+get_tp_task(const struct thread_task *task)
+{
+	return task->list == NULL ? NULL : task->list->tp_task;
+}
+
+struct thread_pool_task*
 make_thread_pool_task(struct thread_task *thread_task)
 {
 	struct thread_pool_task *task = (struct thread_pool_task*) malloc(sizeof(struct thread_pool_task));
@@ -61,12 +76,17 @@ make_thread_pool_task(struct thread_task *thread_task)
 	task->is_running = false;
 	task->is_pushed = false;
 	task->is_joined = false;
+	task->prev = NULL;
 	task->next = NULL;
 	task->pool = NULL;
 	
 	pthread_cond_init(&task->end_cond, NULL);
 
-	thread_task->tp_task = task;
+	struct tp_task_list *list = thread_task->list;
+	struct tp_task_list *new_list = (struct tp_task_list*) malloc(sizeof(struct tp_task_list));
+	new_list->next = list;
+	new_list->tp_task = task;
+	thread_task->list = new_list;
 
 	return task;
 }
@@ -152,6 +172,10 @@ thread_pool_push_task(struct thread_pool *pool, struct thread_task *task)
 	tp_task->is_pushed = true;
 	tp_task->pool = pool;
 	tp_task->next = pool->task;
+	if (pool->task != NULL)
+	{
+		pool->task->prev = tp_task;
+	}
 	pool->task = tp_task;
 
 	pthread_cond_broadcast(&pool->work_cond);
@@ -167,7 +191,7 @@ thread_task_new(struct thread_task **task, thread_task_f function, void *arg)
 
 	new_task->function = function;
 	new_task->arg = arg;
-	new_task->tp_task = NULL;
+	new_task->list = NULL;
 
 	*task = new_task;
 	return 0;
@@ -176,26 +200,46 @@ thread_task_new(struct thread_task **task, thread_task_f function, void *arg)
 bool
 thread_task_is_finished(const struct thread_task *task)
 {
-	return task->tp_task == NULL ? false : task->tp_task->is_finished;
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
+	{
+		return false;
+	}
+
+	struct thread_pool *pool = tp_task->pool;
+	pthread_mutex_lock(&pool->mutex);
+	bool result = tp_task->is_finished;
+	pthread_mutex_unlock(&pool->mutex);
+	return result;
 }
 
 bool
 thread_task_is_running(const struct thread_task *task)
 {
-	return task->tp_task == NULL ? false : task->tp_task->is_running;
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
+	{
+		return false;
+	}
+
+	struct thread_pool *pool = tp_task->pool;
+	pthread_mutex_lock(&pool->mutex);
+	bool result = tp_task->is_running;
+	pthread_mutex_unlock(&pool->mutex);
+	return result;
 }
 
 int
 thread_task_join(struct thread_task *task, void **result)
 {
-	if (task->tp_task == NULL)
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
 	{
 		return TPOOL_ERR_TASK_NOT_PUSHED;
 	}
 	
-	struct thread_pool *pool = task->tp_task->pool;
+	struct thread_pool *pool = tp_task->pool;
 	pthread_mutex_lock(&pool->mutex);
-	struct thread_pool_task *tp_task = task->tp_task;
 
 	tp_task->is_joined = true;
 
@@ -254,11 +298,47 @@ thread_pool_worker(void *arg)
 int
 thread_task_timed_join(struct thread_task *task, double timeout, void **result)
 {
-	/* IMPLEMENT THIS FUNCTION */
-	(void)task;
-	(void)timeout;
-	(void)result;
-	return TPOOL_ERR_NOT_IMPLEMENTED;
+	if (task->tp_task == NULL)
+	{
+		return TPOOL_ERR_TASK_NOT_PUSHED;
+	}
+	struct thread_pool *pool = task->tp_task->pool;
+	pthread_mutex_lock(&pool->mutex);
+
+	if (timeout <= 0.0)
+	{
+		pthread_mutex_unlock(&pool->mutex);
+		return TPOOL_ERR_TIMEOUT;
+	}
+
+	struct thread_pool_task *tp_task = task->tp_task;
+	if (!tp_task->is_finished)
+	{
+		struct timespec timestamp;
+		clock_gettime(CLOCK_MONOTONIC, &timestamp);
+		timestamp.tv_sec += (int)timeout;
+		long nsec = (timeout - (int)timeout) * (long)1e9;
+		timestamp.tv_nsec += nsec;
+		if (timestamp.tv_nsec >= (long)1e9)
+		{
+			timestamp.tv_sec++;
+			timestamp.tv_nsec -= (long)1e9;
+		}
+		
+		int retval = pthread_cond_timedwait(&tp_task->end_cond, &pool->mutex, &timestamp);
+		printf("retval=%d\n", retval);
+		if (retval == ETIMEDOUT)
+		{
+			pthread_mutex_unlock(&pool->mutex);
+			return TPOOL_ERR_TIMEOUT;
+		}
+	}
+
+	*result = tp_task->result;
+
+	pthread_mutex_unlock(&pool->mutex);
+
+	return 0;
 }
 
 #endif
@@ -266,7 +346,7 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result)
 int
 thread_task_delete(struct thread_task *task)
 {
-	struct thread_pool_task *tp_task = task->tp_task;
+	struct thread_pool_task *tp_task = get_tp_task(task);
 	if (tp_task == NULL)
 	{
 		free(task);
@@ -275,46 +355,57 @@ thread_task_delete(struct thread_task *task)
 
 	struct thread_pool *pool = tp_task->pool;
 	pthread_mutex_lock(&pool->mutex);
+	struct tp_task_list *list_it = task->list;
 
-	struct thread_pool_task *tp_it = pool->task;
-	while (tp_it != NULL)
+	while (list_it != NULL)
 	{
-		if (tp_it->thread_task == task && !tp_it->is_joined)
+		struct thread_pool_task *tp_task = list_it->tp_task;
+		if (!tp_task->is_joined)
 		{
 			pthread_mutex_unlock(&pool->mutex);
 			return TPOOL_ERR_TASK_IN_POOL;
 		}
-
-		tp_it = tp_it->next;
+		list_it = list_it->next;
 	}
+
 	int deleted_tasks_cnt = 0;
-
-	tp_it = pool->task;
-	while (tp_it != NULL && tp_it->thread_task == task)
+	list_it = task->list;
+	while (list_it != NULL)
 	{
-		struct thread_pool_task *tp_next = tp_it->next;
-		struct thread_pool_task *tp_copy = tp_it;
+		struct thread_pool_task *tp_task = list_it->tp_task;
+		pthread_cond_destroy(&tp_task->end_cond);
+		
+		struct thread_pool_task *tp_prev = tp_task->prev;
+		struct thread_pool_task *tp_next = tp_task->next;
 
-		pool->task = tp_next;
-		tp_it = tp_next;
-		pthread_cond_destroy(&tp_copy->end_cond);
-		free(tp_copy);
+		if (tp_prev == NULL)
+		{
+			if (tp_next != NULL)
+			{
+				tp_next->prev = NULL;
+			}
+			pool->task = tp_next;
+		}
+		else
+		{
+			if (tp_next != NULL)
+			{
+				tp_next->prev = tp_prev;
+			}
+			tp_prev->next = tp_next;
+		}
+
+		free(tp_task);
+		list_it = list_it->next;
 		deleted_tasks_cnt++;
 	}
 
-	while (tp_it != NULL)
+	list_it = task->list;
+	while (list_it != NULL)
 	{
-		struct thread_pool_task *tp_next = tp_it->next;
-
-		if (tp_next != NULL && tp_next->thread_task == task)
-		{
-			tp_it->next = tp_next->next;
-			pthread_cond_destroy(&tp_next->end_cond);
-			free(tp_next);
-			deleted_tasks_cnt++;
-		}
-		
-		tp_it = tp_it->next;
+		struct tp_task_list *list_copy = list_it;
+		list_it = list_it->next;
+		free(list_copy);
 	}
 
 	free(task);
