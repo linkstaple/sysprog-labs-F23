@@ -308,11 +308,13 @@ thread_pool_worker(void *arg)
 int
 thread_task_timed_join(struct thread_task *task, double timeout, void **result)
 {
-	if (task->tp_task == NULL)
+	struct thread_pool_task *tp_task = get_tp_task(task);
+	if (tp_task == NULL)
 	{
 		return TPOOL_ERR_TASK_NOT_PUSHED;
 	}
-	struct thread_pool *pool = task->tp_task->pool;
+
+	struct thread_pool *pool = tp_task->pool;
 	pthread_mutex_lock(&pool->mutex);
 
 	if (timeout <= 0.0)
@@ -321,22 +323,14 @@ thread_task_timed_join(struct thread_task *task, double timeout, void **result)
 		return TPOOL_ERR_TIMEOUT;
 	}
 
-	struct thread_pool_task *tp_task = task->tp_task;
+	tp_task->is_joined = true;
 	if (!tp_task->is_finished)
 	{
 		struct timespec timestamp;
-		clock_gettime(CLOCK_MONOTONIC, &timestamp);
-		timestamp.tv_sec += (int)timeout;
-		long nsec = (timeout - (int)timeout) * (long)1e9;
-		timestamp.tv_nsec += nsec;
-		if (timestamp.tv_nsec >= (long)1e9)
-		{
-			timestamp.tv_sec++;
-			timestamp.tv_nsec -= (long)1e9;
-		}
+		timestamp.tv_sec = (long long)timeout;
+		timestamp.tv_nsec = (long)((timeout - timestamp.tv_sec) * (long)1e9);
 		
-		int retval = pthread_cond_timedwait(&tp_task->end_cond, &pool->mutex, &timestamp);
-		printf("retval=%d\n", retval);
+		int retval = pthread_cond_timedwait_relative_np(&tp_task->end_cond, &pool->mutex, &timestamp);
 		if (retval == ETIMEDOUT)
 		{
 			pthread_mutex_unlock(&pool->mutex);
