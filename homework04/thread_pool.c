@@ -50,6 +50,7 @@ struct thread_pool {
 	bool is_active;
 
 	struct thread_pool_task *task;
+	struct thread_pool_task *last_task;
 	int tasks_cnt;
 
 	pthread_mutex_t mutex;
@@ -111,6 +112,8 @@ thread_pool_new(int max_thread_count, struct thread_pool **pool)
 	new_pool->tasks_cnt = 0;
 	new_pool->is_active = true;
 	new_pool->active_threads_cnt = 0;
+	new_pool->task = NULL;
+	new_pool->last_task = NULL;
 
 	pthread_mutex_init(&new_pool->mutex, NULL);
 	pthread_cond_init(&new_pool->work_cond, NULL);
@@ -183,6 +186,9 @@ thread_pool_push_task(struct thread_pool *pool, struct thread_task *task)
 		pool->task->prev = tp_task;
 	}
 	pool->task = tp_task;
+	if (pool->last_task == NULL) {
+		pool->last_task = tp_task;
+	}
 
 	pthread_cond_broadcast(&pool->work_cond);
 	pthread_mutex_unlock(&pool->mutex);
@@ -280,6 +286,28 @@ thread_pool_worker(void *arg)
 		if (!pool->is_active) break;
 
 		tp_task->is_running = true;
+		// move task to end
+		if (tp_task != pool->last_task) {
+			if (pool->task == tp_task) {
+				struct thread_pool_task *tp_next = tp_task->next;
+				pool->task = tp_next;
+				tp_next->prev = NULL;
+				tp_task->prev = pool->last_task;
+				pool->last_task->next = tp_task;
+				tp_task->next = NULL;
+				pool->last_task = tp_task;
+			} else {
+				struct thread_pool_task *tp_next = tp_task->next;
+				struct thread_pool_task *tp_prev = tp_task->prev;
+				
+				tp_next->prev = tp_prev;
+				tp_prev->next = tp_next;
+
+				tp_task->prev = pool->last_task;
+				tp_task->next = NULL;
+				pool->last_task = tp_task;
+			}
+		}
 		pthread_mutex_unlock(&pool->mutex);
 		tp_task->result = tp_task->thread_task->function(tp_task->thread_task->arg);
 
@@ -363,7 +391,7 @@ delete_task(struct thread_task *task)
 	while (list_it != NULL)
 	{
 		struct thread_pool_task *tp_task = list_it->tp_task;
-		if (!(tp_task->is_joined || tp_task->is_detached))
+		if (!(tp_task->is_joined || (tp_task->is_detached && tp_task->is_finished)))
 		{
 			return TPOOL_ERR_TASK_IN_POOL;
 		}
@@ -379,6 +407,10 @@ delete_task(struct thread_task *task)
 		
 		struct thread_pool_task *tp_prev = tp_task->prev;
 		struct thread_pool_task *tp_next = tp_task->next;
+
+		if (pool->last_task == tp_task) {
+			pool->last_task = tp_prev;
+		}
 
 		if (tp_prev == NULL)
 		{
